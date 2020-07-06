@@ -1,8 +1,8 @@
 {
   "domain": "metoffice",
-  "name": "Metoffice",
+  "name": "Met Office",
   "documentation": "https://www.home-assistant.io/integrations/metoffice",
   "requirements": ["datapoint==0.9.5"],
-  "dependencies": [],
-  "codeowners": []
+  "codeowners": ["@MrHarcombe"],
+  "config_flow": true
 }

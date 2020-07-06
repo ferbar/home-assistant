@@ -138,7 +138,7 @@ class MailNotificationService(BaseNotificationService):
         except (smtplib.socket.gaierror, ConnectionRefusedError):
             _LOGGER.exception(
                 "SMTP server not found or refused connection (%s:%s). "
-                "Please check the IP address, hostname, and availability of your SMTP server.",
+                "Please check the IP address, hostname, and availability of your SMTP server",
                 self._server,
                 self._port,
             )
@@ -183,7 +183,7 @@ class MailNotificationService(BaseNotificationService):
             msg["From"] = f"{self._sender_name} <{self._sender}>"
         else:
             msg["From"] = self._sender
-        msg["X-Mailer"] = "HomeAssistant"
+        msg["X-Mailer"] = "Home Assistant"
         msg["Date"] = email.utils.format_datetime(dt_util.now())
         msg["Message-Id"] = email.utils.make_msgid()
 

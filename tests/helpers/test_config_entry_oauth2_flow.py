@@ -2,13 +2,14 @@
 import asyncio
 import logging
 import time
-from unittest.mock import patch
 
 import pytest
 
 from homeassistant import config_entries, data_entry_flow, setup
+from homeassistant.config import async_process_ha_core_config
 from homeassistant.helpers import config_entry_oauth2_flow
 
+from tests.async_mock import patch
 from tests.common import MockConfigEntry, mock_platform
 
 TEST_DOMAIN = "oauth2_test"
@@ -68,6 +69,11 @@ class MockOAuth2Implementation(config_entry_oauth2_flow.AbstractOAuth2Implementa
         """Domain that is providing the implementation."""
         return "test"
 
+    @property
+    def extra_authorize_data(self) -> dict:
+        """Extra data that needs to be appended to the authorize url."""
+        return {"extra": "data"}
+
     async def async_generate_authorize_url(self, flow_id: str) -> str:
         """Generate a url for the user to authorize."""
         return "http://example.com/auth"
@@ -122,11 +128,79 @@ async def test_abort_if_authorization_timeout(hass, flow_handler, local_impl):
     assert result["reason"] == "authorize_url_timeout"
 
 
+async def test_step_discovery(hass, flow_handler, local_impl):
+    """Check flow triggers from discovery."""
+    await async_process_ha_core_config(
+        hass, {"external_url": "https://example.com"},
+    )
+    flow_handler.async_register_implementation(hass, local_impl)
+    config_entry_oauth2_flow.async_register_implementation(
+        hass, TEST_DOMAIN, MockOAuth2Implementation()
+    )
+
+    result = await hass.config_entries.flow.async_init(
+        TEST_DOMAIN, context={"source": config_entries.SOURCE_ZEROCONF}
+    )
+
+    assert result["type"] == data_entry_flow.RESULT_TYPE_FORM
+    assert result["step_id"] == "pick_implementation"
+
+
+async def test_abort_discovered_multiple(hass, flow_handler, local_impl):
+    """Test if aborts when discovered multiple times."""
+    await async_process_ha_core_config(
+        hass, {"external_url": "https://example.com"},
+    )
+
+    flow_handler.async_register_implementation(hass, local_impl)
+    config_entry_oauth2_flow.async_register_implementation(
+        hass, TEST_DOMAIN, MockOAuth2Implementation()
+    )
+
+    result = await hass.config_entries.flow.async_init(
+        TEST_DOMAIN, context={"source": config_entries.SOURCE_SSDP}
+    )
+
+    assert result["type"] == data_entry_flow.RESULT_TYPE_FORM
+    assert result["step_id"] == "pick_implementation"
+
+    result = await hass.config_entries.flow.async_init(
+        TEST_DOMAIN, context={"source": config_entries.SOURCE_ZEROCONF}
+    )
+
+    assert result["type"] == data_entry_flow.RESULT_TYPE_ABORT
+    assert result["reason"] == "already_in_progress"
+
+
+async def test_abort_discovered_existing_entries(hass, flow_handler, local_impl):
+    """Test if abort discovery when entries exists."""
+    await async_process_ha_core_config(
+        hass, {"external_url": "https://example.com"},
+    )
+    flow_handler.async_register_implementation(hass, local_impl)
+    config_entry_oauth2_flow.async_register_implementation(
+        hass, TEST_DOMAIN, MockOAuth2Implementation()
+    )
+
+    entry = MockConfigEntry(domain=TEST_DOMAIN, data={},)
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_init(
+        TEST_DOMAIN, context={"source": config_entries.SOURCE_SSDP}
+    )
+
+    assert result["type"] == data_entry_flow.RESULT_TYPE_ABORT
+    assert result["reason"] == "already_configured"
+
+
 async def test_full_flow(
     hass, flow_handler, local_impl, aiohttp_client, aioclient_mock
 ):
     """Check full flow."""
-    hass.config.api.base_url = "https://example.com"
+    await async_process_ha_core_config(
+        hass, {"external_url": "https://example.com"},
+    )
+
     flow_handler.async_register_implementation(hass, local_impl)
     config_entry_oauth2_flow.async_register_implementation(
         hass, TEST_DOMAIN, MockOAuth2Implementation()
