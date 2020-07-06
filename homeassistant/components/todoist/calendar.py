@@ -9,7 +9,7 @@ from homeassistant.components.calendar import PLATFORM_SCHEMA, CalendarEventDevi
 from homeassistant.const import CONF_ID, CONF_NAME, CONF_TOKEN
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.template import DATE_STR_FORMAT
-from homeassistant.util import Throttle, dt
+from homeassistant.util import dt
 
 from .const import (
     ALL_DAY,
@@ -84,7 +84,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     }
 )
 
-MIN_TIME_BETWEEN_UPDATES = timedelta(minutes=15)
+SCAN_INTERVAL = timedelta(minutes=15)
 
 
 def setup_platform(hass, config, add_entities, discovery_info=None):
@@ -152,7 +152,7 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
     add_entities(project_devices)
 
     def handle_new_task(call):
-        """Call when a user creates a new Todoist Task from HASS."""
+        """Call when a user creates a new Todoist Task from Home Assistant."""
         project_name = call.data[PROJECT_NAME]
         project_id = project_id_lookup[project_name]
 
@@ -302,8 +302,7 @@ class TodoistProjectData:
     platform itself, but are not used by this component at all.
 
     The 'update' method polls the Todoist API for new projects/tasks, as well
-    as any updates to current projects/tasks. This is throttled to every
-    MIN_TIME_BETWEEN_UPDATES minutes.
+    as any updates to current projects/tasks. This occurs every SCAN_INTERVAL minutes.
     """
 
     def __init__(
@@ -500,6 +499,8 @@ class TodoistProjectData:
 
         events = []
         for task in project_task_data:
+            if task["due"] is None:
+                continue
             due_date = _parse_due_date(task["due"])
             if start_date < due_date < end_date:
                 event = {
@@ -512,7 +513,6 @@ class TodoistProjectData:
                 events.append(event)
         return events
 
-    @Throttle(MIN_TIME_BETWEEN_UPDATES)
     def update(self):
         """Get the latest data."""
         if self._id is None:
@@ -571,7 +571,7 @@ class TodoistProjectData:
             if self.event[END] is not None:
                 self.event[END] = {DATETIME: self.event[END].strftime(DATE_STR_FORMAT)}
             else:
-                # HASS gets cranky if a calendar event never ends
+                # Home Assistant gets cranky if a calendar event never ends
                 # Let's set our "due date" to tomorrow
                 self.event[END] = {
                     DATETIME: (datetime.utcnow() + timedelta(days=1)).strftime(

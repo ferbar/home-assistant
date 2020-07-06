@@ -18,6 +18,8 @@ from homeassistant.const import (
     EVENT_HOMEASSISTANT_STOP,
     POWER_WATT,
     TEMP_CELSIUS,
+    UNIT_PERCENTAGE,
+    UV_INDEX,
 )
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entity import Entity
@@ -42,12 +44,13 @@ CONF_DUMMY = "dummy"
 CONF_DEBUG = "debug"
 CONF_OFF_DELAY = "off_delay"
 EVENT_BUTTON_PRESSED = "button_pressed"
+SIGNAL_EVENT = f"{DOMAIN}_event"
 
 DATA_TYPES = OrderedDict(
     [
         ("Temperature", TEMP_CELSIUS),
         ("Temperature2", TEMP_CELSIUS),
-        ("Humidity", "%"),
+        ("Humidity", UNIT_PERCENTAGE),
         ("Barometer", ""),
         ("Wind direction", ""),
         ("Rain rate", ""),
@@ -56,7 +59,7 @@ DATA_TYPES = OrderedDict(
         ("Sound", ""),
         ("Sensor Status", ""),
         ("Counter value", ""),
-        ("UV", "uv"),
+        ("UV", UV_INDEX),
         ("Humidity status", ""),
         ("Forecast", ""),
         ("Forecast numeric", ""),
@@ -77,7 +80,6 @@ DATA_TYPES = OrderedDict(
     ]
 )
 
-RECEIVED_EVT_SUBSCRIBERS = []
 RFX_DEVICES = {}
 _LOGGER = logging.getLogger(__name__)
 DATA_RFXOBJECT = "rfxobject"
@@ -118,8 +120,7 @@ def setup(hass, config):
         )
 
         # Callback to HA registered components.
-        for subscriber in RECEIVED_EVT_SUBSCRIBERS:
-            subscriber(event)
+        hass.helpers.dispatcher.dispatcher_send(SIGNAL_EVENT, event)
 
     device = config[DOMAIN].get(ATTR_DEVICE)
     host = config[DOMAIN].get(CONF_HOST)
@@ -129,7 +130,7 @@ def setup(hass, config):
 
     if dummy_connection:
         rfx_object = rfxtrxmod.Connect(
-            device, None, debug=debug, transport_protocol=rfxtrxmod.DummyTransport2
+            device, None, debug=debug, transport_protocol=rfxtrxmod.DummyTransport2,
         )
     elif port is not None:
         # If port is set then we create a TCP connection
@@ -173,6 +174,8 @@ def get_rfx_object(packetid):
         obj = rfxtrxmod.StatusEvent(pkt)
     else:
         obj = rfxtrxmod.ControlEvent(pkt)
+
+    obj.data = binarypacket
     return obj
 
 
@@ -213,7 +216,7 @@ def get_pt2262_device(device_id):
             and device.masked_id == get_pt2262_deviceid(device_id, device.data_bits)
         ):
             _LOGGER.debug(
-                "rfxtrx: found matching device %s for %s", device_id, device.masked_id
+                "rfxtrx: found matching device %s for %s", device_id, device.masked_id,
             )
             return device
     return None
@@ -297,50 +300,19 @@ def get_new_device(event, config, device):
     return new_device
 
 
-def apply_received_command(event):
-    """Apply command from rfxtrx."""
-    device_id = slugify(event.device.id_string.lower())
-    # Check if entity exists or previously added automatically
-    if device_id not in RFX_DEVICES:
-        return
-
-    _LOGGER.debug(
-        "Device_id: %s device_update. Command: %s", device_id, event.values["Command"]
+def fire_command_event(hass, entity_id, command):
+    """Fire a command event."""
+    hass.bus.fire(
+        EVENT_BUTTON_PRESSED, {ATTR_ENTITY_ID: entity_id, ATTR_STATE: command.lower()}
     )
-
-    if event.values["Command"] == "On" or event.values["Command"] == "Off":
-
-        # Update the rfxtrx device state
-        is_on = event.values["Command"] == "On"
-        RFX_DEVICES[device_id].update_state(is_on)
-
-    elif (
-        hasattr(RFX_DEVICES[device_id], "brightness")
-        and event.values["Command"] == "Set level"
-    ):
-        _brightness = event.values["Dim level"] * 255 // 100
-
-        # Update the rfxtrx device state
-        is_on = _brightness > 0
-        RFX_DEVICES[device_id].update_state(is_on, _brightness)
-
-    # Fire event
-    if RFX_DEVICES[device_id].should_fire_event:
-        RFX_DEVICES[device_id].hass.bus.fire(
-            EVENT_BUTTON_PRESSED,
-            {
-                ATTR_ENTITY_ID: RFX_DEVICES[device_id].entity_id,
-                ATTR_STATE: event.values["Command"].lower(),
-            },
-        )
-        _LOGGER.debug(
-            "Rfxtrx fired event: (event_type: %s, %s: %s, %s: %s)",
-            EVENT_BUTTON_PRESSED,
-            ATTR_ENTITY_ID,
-            RFX_DEVICES[device_id].entity_id,
-            ATTR_STATE,
-            event.values["Command"].lower(),
-        )
+    _LOGGER.debug(
+        "Rfxtrx fired event: (event_type: %s, %s: %s, %s: %s)",
+        EVENT_BUTTON_PRESSED,
+        ATTR_ENTITY_ID,
+        entity_id,
+        ATTR_STATE,
+        command.lower(),
+    )
 
 
 class RfxtrxDevice(Entity):
@@ -356,12 +328,7 @@ class RfxtrxDevice(Entity):
         self._event = event
         self._state = datas[ATTR_STATE]
         self._should_fire_event = datas[ATTR_FIRE_EVENT]
-        self._brightness = 0
-        self.added_to_hass = False
-
-    async def async_added_to_hass(self):
-        """Subscribe RFXtrx events."""
-        self.added_to_hass = True
+        self._unique_id = f"{slugify(self._event.device.type_string.lower())}_{slugify(self._event.device.id_string.lower())}"
 
     @property
     def should_poll(self):
@@ -388,16 +355,13 @@ class RfxtrxDevice(Entity):
         """Return true if unable to access real state of entity."""
         return True
 
-    def turn_off(self, **kwargs):
-        """Turn the device off."""
-        self._send_command("turn_off")
+    @property
+    def unique_id(self):
+        """Return unique identifier of remote device."""
+        return self._unique_id
 
-    def update_state(self, state, brightness=0):
-        """Update det state of the device."""
-        self._state = state
-        self._brightness = brightness
-        if self.added_to_hass:
-            self.schedule_update_ha_state()
+    def _apply_event(self, event):
+        """Apply a received event."""
 
     def _send_command(self, command, brightness=0):
         if not self._event:
@@ -418,19 +382,21 @@ class RfxtrxDevice(Entity):
             for _ in range(self.signal_repetitions):
                 self._event.device.send_off(rfx_object.transport)
             self._state = False
-            self._brightness = 0
 
         elif command == "roll_up":
             for _ in range(self.signal_repetitions):
                 self._event.device.send_open(rfx_object.transport)
+            self._state = True
 
         elif command == "roll_down":
             for _ in range(self.signal_repetitions):
                 self._event.device.send_close(rfx_object.transport)
+            self._state = False
 
         elif command == "stop_roll":
             for _ in range(self.signal_repetitions):
                 self._event.device.send_stop(rfx_object.transport)
+            self._state = True
 
-        if self.added_to_hass:
+        if self.hass:
             self.schedule_update_ha_state()

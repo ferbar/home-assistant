@@ -1,10 +1,10 @@
 """The tests for the notify smtp platform."""
 import re
 import unittest
-from unittest.mock import patch
 
 from homeassistant.components.smtp.notify import MailNotificationService
 
+from tests.async_mock import patch
 from tests.common import get_test_home_assistant
 
 
@@ -31,11 +31,12 @@ class TestNotifySmtp(unittest.TestCase):
             "testuser",
             "testpass",
             ["recip1@example.com", "testrecip@test.com"],
-            "HomeAssistant",
+            "Home Assistant",
             0,
         )
+        self.addCleanup(self.tear_down_cleanup)
 
-    def tearDown(self):  # pylint: disable=invalid-name
+    def tear_down_cleanup(self):
         """Stop down everything that was started."""
         self.hass.stop()
 
@@ -49,8 +50,8 @@ class TestNotifySmtp(unittest.TestCase):
             "Content-Transfer-Encoding: 7bit\n"
             "Subject: Home Assistant\n"
             "To: recip1@example.com,testrecip@test.com\n"
-            "From: HomeAssistant <test@test.com>\n"
-            "X-Mailer: HomeAssistant\n"
+            "From: Home Assistant <test@test.com>\n"
+            "X-Mailer: Home Assistant\n"
             "Date: [^\n]+\n"
             "Message-Id: <[^@]+@[^>]+>\n"
             "\n"

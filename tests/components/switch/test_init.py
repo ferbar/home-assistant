@@ -4,7 +4,7 @@ import unittest
 
 from homeassistant import core
 from homeassistant.components import switch
-from homeassistant.const import CONF_PLATFORM, STATE_OFF, STATE_ON
+from homeassistant.const import CONF_PLATFORM
 from homeassistant.setup import async_setup_component, setup_component
 
 from tests.common import get_test_home_assistant, mock_entity_platform
@@ -22,19 +22,14 @@ class TestSwitch(unittest.TestCase):
         platform.init()
         # Switch 1 is ON, switch 2 is OFF
         self.switch_1, self.switch_2, self.switch_3 = platform.ENTITIES
-
-    # pylint: disable=invalid-name
-    def tearDown(self):
-        """Stop everything that was started."""
-        self.hass.stop()
+        self.addCleanup(self.hass.stop)
 
     def test_methods(self):
         """Test is_on, turn_on, turn_off methods."""
         assert setup_component(
             self.hass, switch.DOMAIN, {switch.DOMAIN: {CONF_PLATFORM: "test"}}
         )
-        assert switch.is_on(self.hass)
-        assert STATE_ON == self.hass.states.get(switch.ENTITY_ID_ALL_SWITCHES).state
+        self.hass.block_till_done()
         assert switch.is_on(self.hass, self.switch_1.entity_id)
         assert not switch.is_on(self.hass, self.switch_2.entity_id)
         assert not switch.is_on(self.hass, self.switch_3.entity_id)
@@ -44,7 +39,6 @@ class TestSwitch(unittest.TestCase):
 
         self.hass.block_till_done()
 
-        assert switch.is_on(self.hass)
         assert not switch.is_on(self.hass, self.switch_1.entity_id)
         assert switch.is_on(self.hass, self.switch_2.entity_id)
 
@@ -53,8 +47,6 @@ class TestSwitch(unittest.TestCase):
 
         self.hass.block_till_done()
 
-        assert not switch.is_on(self.hass)
-        assert STATE_OFF == self.hass.states.get(switch.ENTITY_ID_ALL_SWITCHES).state
         assert not switch.is_on(self.hass, self.switch_1.entity_id)
         assert not switch.is_on(self.hass, self.switch_2.entity_id)
         assert not switch.is_on(self.hass, self.switch_3.entity_id)
@@ -64,8 +56,6 @@ class TestSwitch(unittest.TestCase):
 
         self.hass.block_till_done()
 
-        assert switch.is_on(self.hass)
-        assert STATE_ON == self.hass.states.get(switch.ENTITY_ID_ALL_SWITCHES).state
         assert switch.is_on(self.hass, self.switch_1.entity_id)
         assert switch.is_on(self.hass, self.switch_2.entity_id)
         assert switch.is_on(self.hass, self.switch_3.entity_id)
@@ -84,7 +74,7 @@ class TestSwitch(unittest.TestCase):
             switch.DOMAIN,
             {
                 switch.DOMAIN: {CONF_PLATFORM: "test"},
-                "{} 2".format(switch.DOMAIN): {CONF_PLATFORM: "test2"},
+                f"{switch.DOMAIN} 2": {CONF_PLATFORM: "test2"},
             },
         )
 
@@ -110,3 +100,13 @@ async def test_switch_context(hass, hass_admin_user):
     assert state2 is not None
     assert state.state != state2.state
     assert state2.context.user_id == hass_admin_user.id
+
+
+def test_deprecated_base_class(caplog):
+    """Test deprecated base class."""
+
+    class CustomSwitch(switch.SwitchDevice):
+        pass
+
+    CustomSwitch()
+    assert "SwitchDevice is deprecated, modify CustomSwitch" in caplog.text
